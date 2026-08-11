@@ -9,11 +9,11 @@ from typing import Any
 
 import psycopg
 import streamlit as st
-from psycopg.rows import dict_row
 
 import quiz.repository as repository
 
 
+from perf_utils import perf_log
 LEGACY_USER_ID = "local_player"
 
 TEST_ACCOUNTS = (
@@ -54,13 +54,10 @@ def _database_url() -> str:
 
 
 def _auth_connection():
-    return psycopg.connect(
-        _database_url(),
-        row_factory=dict_row,
-        connect_timeout=10,
-    )
+    return repository.get_player_connection()
 
 
+@st.cache_resource(show_spinner=False)
 def initialize_auth_tables() -> None:
     with _auth_connection() as conn:
         with conn.cursor() as cur:
@@ -96,6 +93,8 @@ def _hash_password(
     return digest.hex(), salt.hex()
 
 
+@perf_log("auth.bootstrap_test_users")
+@st.cache_resource(show_spinner=False)
 def bootstrap_test_users() -> None:
     """기존 HIGH/MID/LOW 테스트 계정을 Supabase에 보존한다."""
     initialize_auth_tables()
@@ -159,6 +158,7 @@ def _restore_user_id(
     return str(stored_user_key or "")
 
 
+@perf_log("auth.authenticate")
 def authenticate(
     username: str,
     password: str,
@@ -211,6 +211,7 @@ def authenticate(
     }
 
 
+@perf_log("auth.create_account")
 def create_account(
     username: str,
     password: str,
@@ -239,8 +240,6 @@ def create_account(
 
     if password != password_confirm:
         return False, "접속 암호가 서로 일치하지 않습니다.", None
-
-    initialize_auth_tables()
 
     with _auth_connection() as conn:
         with conn.cursor() as cur:
@@ -339,6 +338,7 @@ def _complete_login(user: dict[str, Any]) -> None:
     apply_runtime_user(user["user_id"])
 
 
+@perf_log("auth.login_gate")
 def login_gate() -> bool:
     try:
         bootstrap_test_users()

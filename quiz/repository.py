@@ -3,14 +3,17 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from contextlib import contextmanager
 
 import psycopg
 import streamlit as st
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from perf_utils import perf_log
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = PROJECT_ROOT / "data" / "game.db"
 LOCAL_USER_ID = "local_user"
@@ -28,12 +31,31 @@ def _database_url() -> str:
     return value
 
 
-def get_player_connection():
-    return psycopg.connect(
-        _database_url(),
-        row_factory=dict_row,
-        connect_timeout=10,
+@perf_log("db.pool_init")
+@st.cache_resource(show_spinner=False)
+def get_postgres_pool() -> ConnectionPool:
+    pool = ConnectionPool(
+        conninfo=_database_url(),
+        kwargs={
+            "row_factory": dict_row,
+            "connect_timeout": 10,
+        },
+        min_size=1,
+        max_size=4,
+        timeout=10,
+        max_idle=300,
+        open=True,
+        name="learning-quest-db",
     )
+    pool.wait(timeout=10)
+    return pool
+
+
+@contextmanager
+def get_player_connection():
+    pool = get_postgres_pool()
+    with pool.connection(timeout=10) as conn:
+        yield conn
 
 
 def get_connection() -> sqlite3.Connection:
@@ -52,6 +74,7 @@ def _ensure_column(conn: sqlite3.Connection, table: str, name: str, ddl: str) ->
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
 
 
+@st.cache_resource(show_spinner=False)
 def initialize_database() -> None:
     """기존 game.db를 보존하면서 현재 코드가 요구하는 스키마만 보강한다.
 
@@ -291,6 +314,7 @@ def _player_row_to_dict(row: Any) -> dict[str, Any]:
     return data
 
 
+@perf_log("db.player.get")
 def get_or_create_player_state(
     user_id: str = LOCAL_USER_ID,
 ) -> dict[str, Any]:
@@ -350,18 +374,47 @@ def get_or_create_player_state(
     return _player_row_to_dict(row)
 
 
+@perf_log("db.player.save")
 def save_player_state(
     state: dict[str, Any],
     user_id: str = LOCAL_USER_ID,
 ) -> None:
     uid = str(user_id or state.get("user_id") or LOCAL_USER_ID)
 
-    current = get_or_create_player_state(uid)
-    merged = {**current, **state, "user_id": uid}
-    updated_at = datetime.now().isoformat(timespec="seconds")
-
     with get_player_connection() as conn:
         with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM public.player_state
+                WHERE user_id = %s
+                """,
+                (uid,),
+            )
+            row = cur.fetchone()
+
+            if row is None:
+                current = {
+                    "user_id": uid,
+                    "level": 1,
+                    "xp": 0,
+                    "stat_points": 0,
+                    "intelligence": 1,
+                    "wisdom": 1,
+                    "vitality": 1,
+                    "luck": 1,
+                    "player_hp": 50,
+                    "battle_tickets": 5,
+                    "inventory": [],
+                    "equipped_item": {},
+                    "extra_state": {},
+                }
+            else:
+                current = _player_row_to_dict(row)
+
+            merged = {**current, **state, "user_id": uid}
+            updated_at = datetime.now().isoformat(timespec="seconds")
+
             cur.execute(
                 """
                 INSERT INTO public.player_state (
@@ -408,7 +461,6 @@ def save_player_state(
                     updated_at,
                 ),
             )
-
         conn.commit()
 
 
@@ -419,6 +471,7 @@ def _build_question_hash(category: str, difficulty: str, question_text: str) -> 
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+@perf_log("sqlite.question.save")
 def save_question(question: dict[str, Any]) -> bool:
     initialize_database()
 
@@ -529,6 +582,7 @@ def _question_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     return data
 
 
+@perf_log("sqlite.question.count")
 def count_available_questions(category: str, difficulty: str) -> int:
     initialize_database()
     with get_connection() as conn:
@@ -539,6 +593,7 @@ def count_available_questions(category: str, difficulty: str) -> int:
     return int(row["n"] if row else 0)
 
 
+@perf_log("sqlite.question.get")
 def get_available_questions(category: str, difficulty: str, limit: int = 1) -> list[dict[str, Any]]:
     initialize_database()
     with get_connection() as conn:
@@ -570,6 +625,7 @@ def _world_row_to_dict(row: Any) -> dict[str, Any]:
     return data
 
 
+@perf_log("db.world.create")
 def create_learning_world(
     *,
     world_name: str,
@@ -644,6 +700,7 @@ def create_learning_world(
     return int(row["id"])
 
 
+@perf_log("db.world.list")
 def get_learning_worlds(
     user_id: str = LOCAL_USER_ID,
 ) -> list[dict[str, Any]]:
@@ -665,6 +722,7 @@ def get_learning_worlds(
     return [_world_row_to_dict(row) for row in rows]
 
 
+@perf_log("db.world.active")
 def get_active_learning_world(
     user_id: str = LOCAL_USER_ID,
 ) -> dict[str, Any] | None:
@@ -701,6 +759,7 @@ def get_active_learning_world(
     return _world_row_to_dict(row) if row is not None else None
 
 
+@perf_log("db.world.set_active")
 def set_active_learning_world(
     world_id: int,
     user_id: str = LOCAL_USER_ID,
@@ -748,6 +807,7 @@ def set_active_learning_world(
 
 
 
+@perf_log("db.attempt.insert")
 def record_question_attempt(
     *,
     user_id: str,
@@ -814,6 +874,7 @@ def record_question_attempt(
         conn.commit()
 
 
+@perf_log("db.attempt.list")
 def get_question_attempts(
     user_id: str,
     world_id: int | None = None,
