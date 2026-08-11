@@ -3,6 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+
+import psycopg
+import streamlit as st
+from psycopg.rows import dict_row
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -10,6 +14,26 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = PROJECT_ROOT / "data" / "game.db"
 LOCAL_USER_ID = "local_user"
+
+
+def _database_url() -> str:
+    try:
+        value = str(st.secrets["DATABASE_URL"]).strip()
+    except Exception as exc:
+        raise RuntimeError("DATABASE_URL을 찾을 수 없습니다.") from exc
+
+    if not value:
+        raise RuntimeError("DATABASE_URL이 비어 있습니다.")
+
+    return value
+
+
+def get_player_connection():
+    return psycopg.connect(
+        _database_url(),
+        row_factory=dict_row,
+        connect_timeout=10,
+    )
 
 
 def get_connection() -> sqlite3.Connection:
@@ -259,7 +283,7 @@ def _loads(value: Any, default: Any) -> Any:
         return default
 
 
-def _player_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+def _player_row_to_dict(row: Any) -> dict[str, Any]:
     data = dict(row)
     data["inventory"] = _loads(data.get("inventory"), [])
     data["equipped_item"] = _loads(data.get("equipped_item"), {})
@@ -267,62 +291,126 @@ def _player_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     return data
 
 
-def get_or_create_player_state(user_id: str = LOCAL_USER_ID) -> dict[str, Any]:
-    initialize_database()
+def get_or_create_player_state(
+    user_id: str = LOCAL_USER_ID,
+) -> dict[str, Any]:
     uid = str(user_id)
-    with get_connection() as conn:
-        row = conn.execute("SELECT * FROM player_state WHERE user_id = ?", (uid,)).fetchone()
-        if row is None:
-            conn.execute("INSERT INTO player_state (user_id) VALUES (?)", (uid,))
-            conn.commit()
-            row = conn.execute("SELECT * FROM player_state WHERE user_id = ?", (uid,)).fetchone()
+
+    with get_player_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM public.player_state
+                WHERE user_id = %s
+                """,
+                (uid,),
+            )
+            row = cur.fetchone()
+
+            if row is None:
+                cur.execute(
+                    """
+                    INSERT INTO public.player_state (
+                        user_id, level, xp, stat_points,
+                        intelligence, wisdom, vitality, luck,
+                        player_hp, battle_tickets,
+                        inventory, equipped_item, extra_state, updated_at
+                    )
+                    VALUES (
+                        %s, 1, 0, 0,
+                        1, 1, 1, 1,
+                        50, 5,
+                        '[]', '{}', '{}', %s
+                    )
+                    ON CONFLICT (user_id) DO NOTHING
+                    """,
+                    (
+                        uid,
+                        datetime.now().isoformat(timespec="seconds"),
+                    ),
+                )
+                conn.commit()
+
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM public.player_state
+                    WHERE user_id = %s
+                    """,
+                    (uid,),
+                )
+                row = cur.fetchone()
+
+    if row is None:
+        raise RuntimeError(
+            f"player_state를 생성하거나 불러오지 못했습니다: {uid}"
+        )
+
     return _player_row_to_dict(row)
 
 
-def save_player_state(state: dict[str, Any], user_id: str = LOCAL_USER_ID) -> None:
-    initialize_database()
+def save_player_state(
+    state: dict[str, Any],
+    user_id: str = LOCAL_USER_ID,
+) -> None:
     uid = str(user_id or state.get("user_id") or LOCAL_USER_ID)
+
     current = get_or_create_player_state(uid)
     merged = {**current, **state, "user_id": uid}
-    with get_connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO player_state (
-                user_id, level, xp, stat_points, intelligence, wisdom, vitality, luck,
-                player_hp, battle_tickets, inventory, equipped_item, extra_state, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(user_id) DO UPDATE SET
-                level=excluded.level,
-                xp=excluded.xp,
-                stat_points=excluded.stat_points,
-                intelligence=excluded.intelligence,
-                wisdom=excluded.wisdom,
-                vitality=excluded.vitality,
-                luck=excluded.luck,
-                player_hp=excluded.player_hp,
-                battle_tickets=excluded.battle_tickets,
-                inventory=excluded.inventory,
-                equipped_item=excluded.equipped_item,
-                extra_state=excluded.extra_state,
-                updated_at=CURRENT_TIMESTAMP
-            """,
-            (
-                uid,
-                int(merged.get("level", 1)),
-                int(merged.get("xp", 0)),
-                int(merged.get("stat_points", 0)),
-                int(merged.get("intelligence", 1)),
-                int(merged.get("wisdom", 1)),
-                int(merged.get("vitality", 1)),
-                int(merged.get("luck", 1)),
-                int(merged.get("player_hp", 50)),
-                int(merged.get("battle_tickets", 5)),
-                json.dumps(merged.get("inventory", []), ensure_ascii=False),
-                json.dumps(merged.get("equipped_item", {}), ensure_ascii=False),
-                json.dumps(merged.get("extra_state", {}), ensure_ascii=False),
-            ),
-        )
+    updated_at = datetime.now().isoformat(timespec="seconds")
+
+    with get_player_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO public.player_state (
+                    user_id, level, xp, stat_points,
+                    intelligence, wisdom, vitality, luck,
+                    player_hp, battle_tickets,
+                    inventory, equipped_item, extra_state, updated_at
+                )
+                VALUES (
+                    %s, %s, %s, %s,
+                    %s, %s, %s, %s,
+                    %s, %s,
+                    %s, %s, %s, %s
+                )
+                ON CONFLICT (user_id) DO UPDATE SET
+                    level = EXCLUDED.level,
+                    xp = EXCLUDED.xp,
+                    stat_points = EXCLUDED.stat_points,
+                    intelligence = EXCLUDED.intelligence,
+                    wisdom = EXCLUDED.wisdom,
+                    vitality = EXCLUDED.vitality,
+                    luck = EXCLUDED.luck,
+                    player_hp = EXCLUDED.player_hp,
+                    battle_tickets = EXCLUDED.battle_tickets,
+                    inventory = EXCLUDED.inventory,
+                    equipped_item = EXCLUDED.equipped_item,
+                    extra_state = EXCLUDED.extra_state,
+                    updated_at = EXCLUDED.updated_at
+                """,
+                (
+                    uid,
+                    int(merged.get("level", 1)),
+                    int(merged.get("xp", 0)),
+                    int(merged.get("stat_points", 0)),
+                    int(merged.get("intelligence", 1)),
+                    int(merged.get("wisdom", 1)),
+                    int(merged.get("vitality", 1)),
+                    int(merged.get("luck", 1)),
+                    int(merged.get("player_hp", 50)),
+                    int(merged.get("battle_tickets", 5)),
+                    json.dumps(merged.get("inventory", []), ensure_ascii=False),
+                    json.dumps(merged.get("equipped_item", {}), ensure_ascii=False),
+                    json.dumps(merged.get("extra_state", {}), ensure_ascii=False),
+                    updated_at,
+                ),
+            )
+
         conn.commit()
+
 
 
 def _build_question_hash(category: str, difficulty: str, question_text: str) -> str:
