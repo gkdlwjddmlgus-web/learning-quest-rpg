@@ -12,10 +12,15 @@ def inject_styles() -> None:
 
 /* Streamlit default multipage navigation: hide it so PLAYER STATUS starts at the top. */
 [data-testid="stSidebarNav"],
-[data-testid="stSidebarNavItems"],
-section[data-testid="stSidebar"] nav {
+[data-testid="stSidebarNavItems"] {
     display:none!important;
 }
+
+/*
+Streamlit 버전에 따라 sidebar 내부가 nav 요소로 감싸질 수 있으므로
+section[data-testid="stSidebar"] nav 전체를 숨기면 실제 사이드바 HUD까지
+사라질 수 있다. 기본 multipage navigation testid만 선택적으로 숨긴다.
+*/
 [data-testid="stSidebar"] > div:first-child {
     padding-top:0!important;
 }
@@ -849,6 +854,232 @@ body:has(.portal-mode-marker) div[data-baseweb="menu"] li:hover{
 .hub6-shell .hub6-card.far-left,
 .hub6-shell .hub6-card.far-right{
     opacity:.30;
+}
+
+
+
+
+/* =========================================================
+   GAME SHELL / SIDEBAR THEME SYNC v2
+   - sidebar만 월드 테마별 변경
+   - header는 모든 테마에서 동일한 navy
+   - main 화면은 앱 공통 dark theme 사용
+   ========================================================= */
+.sidebar-theme-marker{display:none}
+
+/* sidebar theme variables --------------------------------------------------- */
+.stApp:has(.sidebar-theme-fantasy){
+    --side-bg:#151a35;
+    --side-bg-soft:#22294b;
+    --side-panel:rgba(45,52,94,.92);
+    --side-panel-soft:rgba(126,137,218,.13);
+    --side-border:rgba(160,170,236,.28);
+    --side-accent:#aab3ff;
+    --side-accent-2:#c7a8ff;
+    --side-text:#f0f1ff;
+    --side-muted:#aeb5d7;
+}
+.stApp:has(.sidebar-theme-wuxia){
+    --side-bg:#241716;
+    --side-bg-soft:#35211e;
+    --side-panel:rgba(69,42,35,.93);
+    --side-panel-soft:rgba(179,127,81,.12);
+    --side-border:rgba(210,167,105,.28);
+    --side-accent:#d5aa69;
+    --side-accent-2:#b86f60;
+    --side-text:#fff4e9;
+    --side-muted:#cfb6a1;
+}
+.stApp:has(.sidebar-theme-sf){
+    --side-bg:#061b2c;
+    --side-bg-soft:#082b3d;
+    --side-panel:rgba(8,42,62,.94);
+    --side-panel-soft:rgba(48,205,229,.10);
+    --side-border:rgba(76,220,239,.30);
+    --side-accent:#45d8ec;
+    --side-accent-2:#628cff;
+    --side-text:#eafcff;
+    --side-muted:#9ccbd4;
+}
+.stApp:has(.sidebar-theme-cute){
+    --side-bg:#eaf4ff;
+    --side-bg-soft:#f4f0ff;
+    --side-panel:rgba(248,251,255,.98);
+    --side-panel-soft:rgba(111,171,220,.13);
+    --side-border:rgba(108,151,198,.28);
+    --side-accent:#64add8;
+    --side-accent-2:#e4a0c2;
+    --side-text:#263950;
+    --side-muted:#6f8095;
+}
+.stApp:has(.sidebar-theme-dark-fantasy){
+    --side-bg:#160f21;
+    --side-bg-soft:#25162f;
+    --side-panel:rgba(42,26,53,.94);
+    --side-panel-soft:rgba(171,78,130,.11);
+    --side-border:rgba(191,105,158,.28);
+    --side-accent:#c46fa7;
+    --side-accent-2:#8f68d4;
+    --side-text:#f7eef9;
+    --side-muted:#bda9c6;
+}
+.stApp:has(.sidebar-theme-modern){
+    --side-bg:#182334;
+    --side-bg-soft:#223149;
+    --side-panel:rgba(35,49,72,.95);
+    --side-panel-soft:rgba(104,143,184,.10);
+    --side-border:rgba(111,143,180,.25);
+    --side-accent:#75a2cf;
+    --side-accent-2:#8fb3d7;
+    --side-text:#eff5fb;
+    --side-muted:#a7b5c6;
+}
+
+/* fixed global header ------------------------------------------------------- */
+header[data-testid="stHeader"]{
+    background:#11172d !important;
+    border-bottom:1px solid rgba(125,145,185,.18) !important;
+}
+[data-testid="stToolbar"]{
+    background:transparent !important;
+}
+[data-testid="stDecoration"]{
+    background:linear-gradient(90deg,#1bbbd0,#6d7df1) !important;
+}
+
+/*
+Streamlit header는 overlay 방식이라 block-container가 너무 위로 올라오면
+'마을로' / 페이지 제목이 헤더 아래에 가려진다.
+게임 화면에서는 헤더 높이만큼 안전 여백을 확보한다.
+*/
+.stApp:has(.sidebar-theme-marker) [data-testid="stMainBlockContainer"],
+.stApp:has(.sidebar-theme-marker) section[data-testid="stMain"] .block-container{
+    max-width:1520px !important;
+    padding-top:3.85rem !important;
+    padding-left:1.15rem !important;
+    padding-right:1.15rem !important;
+    padding-bottom:2rem !important;
+}
+
+/* portal/login 화면은 기존 cinematic spacing을 유지 */
+.stApp:has(.portal-mode-marker) [data-testid="stMainBlockContainer"],
+.stApp:has(.portal-mode-marker) section[data-testid="stMain"] .block-container{
+    padding-top:5vh !important;
+}
+
+/* sidebar shell ------------------------------------------------------------- */
+.stApp:has(.sidebar-theme-marker) section[data-testid="stSidebar"]{
+    background:
+        radial-gradient(circle at 14% 4%,var(--side-panel-soft),transparent 30%),
+        linear-gradient(180deg,var(--side-bg-soft),var(--side-bg)) !important;
+    border-right:1px solid var(--side-border) !important;
+}
+
+/* 텍스트는 넓은 * 선택자를 쓰지 않고 필요한 UI만 명시한다 */
+.stApp:has(.sidebar-theme-marker) .hud-card,
+.stApp:has(.sidebar-theme-marker) .hud-world,
+.stApp:has(.sidebar-theme-marker) .hud-stat,
+.stApp:has(.sidebar-theme-marker) .hud-resource,
+.stApp:has(.sidebar-theme-marker) .hud-mini-stat,
+.stApp:has(.sidebar-theme-marker) .hud-section-title{
+    color:var(--side-text) !important;
+}
+.stApp:has(.sidebar-theme-marker) .hud-eyebrow,
+.stApp:has(.sidebar-theme-marker) .hud-subtitle,
+.stApp:has(.sidebar-theme-marker) .hud-xp,
+.stApp:has(.sidebar-theme-marker) .hud-stat-label,
+.stApp:has(.sidebar-theme-marker) .hud-resource-label,
+.stApp:has(.sidebar-theme-marker) .hud-world-topic,
+.stApp:has(.sidebar-theme-marker) .hud-section-title{
+    color:var(--side-muted) !important;
+}
+
+/* HUD cards */
+.stApp:has(.sidebar-theme-marker) .hud-card{
+    background:linear-gradient(145deg,var(--side-panel),var(--side-panel-soft)) !important;
+    border-color:var(--side-border) !important;
+    box-shadow:0 12px 28px rgba(0,0,0,.10) !important;
+}
+.stApp:has(.sidebar-theme-marker) .hud-world,
+.stApp:has(.sidebar-theme-marker) .hud-stat,
+.stApp:has(.sidebar-theme-marker) .hud-resource,
+.stApp:has(.sidebar-theme-marker) .hud-mini-stat{
+    background:var(--side-panel-soft) !important;
+    border-color:var(--side-border) !important;
+}
+.stApp:has(.sidebar-theme-marker) .hud-bar-fill{
+    background:linear-gradient(90deg,var(--side-accent),var(--side-accent-2)) !important;
+}
+
+/* Sidebar captions */
+.stApp:has(.sidebar-theme-marker) section[data-testid="stSidebar"] .stCaption,
+.stApp:has(.sidebar-theme-marker) section[data-testid="stSidebar"] [data-testid="stCaptionContainer"],
+.stApp:has(.sidebar-theme-marker) section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p{
+    color:var(--side-muted) !important;
+}
+
+/* Buttons: 특히 cute 테마에서 흰 박스/흰 글씨가 되지 않게 내부 p/span까지 명시 */
+.stApp:has(.sidebar-theme-marker) section[data-testid="stSidebar"] .stButton>button{
+    background:var(--side-panel) !important;
+    border:1px solid var(--side-border) !important;
+    color:var(--side-text) !important;
+}
+.stApp:has(.sidebar-theme-marker) section[data-testid="stSidebar"] .stButton>button p,
+.stApp:has(.sidebar-theme-marker) section[data-testid="stSidebar"] .stButton>button span{
+    color:var(--side-text) !important;
+    -webkit-text-fill-color:var(--side-text) !important;
+    opacity:1 !important;
+}
+.stApp:has(.sidebar-theme-marker) section[data-testid="stSidebar"] .stButton>button:hover{
+    border-color:var(--side-accent) !important;
+    box-shadow:0 0 0 1px var(--side-accent) inset !important;
+}
+
+/* Selectbox */
+.stApp:has(.sidebar-theme-marker) section[data-testid="stSidebar"] [data-testid="stSelectbox"] label,
+.stApp:has(.sidebar-theme-marker) section[data-testid="stSidebar"] [data-testid="stSelectbox"] label p{
+    color:var(--side-text) !important;
+}
+.stApp:has(.sidebar-theme-marker) section[data-testid="stSidebar"] div[data-baseweb="select"],
+.stApp:has(.sidebar-theme-marker) section[data-testid="stSidebar"] div[data-baseweb="select"]>div{
+    background:var(--side-panel) !important;
+    border-color:var(--side-border) !important;
+    color:var(--side-text) !important;
+}
+.stApp:has(.sidebar-theme-marker) section[data-testid="stSidebar"] div[data-baseweb="select"] span,
+.stApp:has(.sidebar-theme-marker) section[data-testid="stSidebar"] div[data-baseweb="select"] div{
+    color:var(--side-text) !important;
+    -webkit-text-fill-color:var(--side-text) !important;
+}
+
+/* Save alert */
+.stApp:has(.sidebar-theme-marker) section[data-testid="stSidebar"] [data-testid="stAlert"]{
+    background:var(--side-panel-soft) !important;
+    border:1px solid var(--side-border) !important;
+}
+.stApp:has(.sidebar-theme-marker) section[data-testid="stSidebar"] [data-testid="stAlert"] p,
+.stApp:has(.sidebar-theme-marker) section[data-testid="stSidebar"] [data-testid="stAlert"] div{
+    color:var(--side-text) !important;
+}
+
+/* cute는 밝은 sidebar이므로 토글/아이콘도 어둡게 */
+.stApp:has(.sidebar-theme-cute) section[data-testid="stSidebar"] button svg{
+    color:#34475e !important;
+    fill:#34475e !important;
+}
+
+/* large desktop width ------------------------------------------------------- */
+@media (min-width:1200px){
+    .stApp:has(.sidebar-theme-marker) [data-testid="stMainBlockContainer"]{
+        width:min(96vw,1520px) !important;
+    }
+}
+@media (max-width:900px){
+    .stApp:has(.sidebar-theme-marker) [data-testid="stMainBlockContainer"]{
+        padding-top:3.55rem !important;
+        padding-left:.8rem !important;
+        padding-right:.8rem !important;
+    }
 }
 
 </style>

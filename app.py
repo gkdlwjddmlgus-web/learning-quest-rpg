@@ -1,6 +1,15 @@
 import streamlit as st
 
-st.set_option("client.showSidebarNavigation", False)
+st.set_page_config(
+    page_title="Learning Quest RPG",
+    page_icon="⚔️",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# 첫 로그인 화면부터 sidebar DOM을 만들어 둔다.
+# 로그인 후 실제 HUD가 렌더링될 때 이 placeholder는 제거된다.
+_sidebar_bootstrap = st.sidebar.empty()
 
 from components.styles import inject_styles
 inject_styles()
@@ -33,6 +42,7 @@ from ui_tabs.wrong_tab import render_wrong_tab
 from ui_tabs.record_tab import render_record_tab
 from ui_tabs.profile_tab import render_profile_tab
 
+_sidebar_bootstrap.empty()
 render_sidebar()
 
 if "game_view" not in st.session_state:

@@ -78,8 +78,6 @@ def generate_and_save_learning_world(
     )
 
 
-st.set_page_config(page_title="Learning Quest RPG", page_icon="⚔️", layout="wide")
-
 EQUIPMENT_SLOTS = ["무기", "투구", "갑옷", "장갑", "신발"]
 CATEGORIES = ["Python", "SQL", "통계", "데이터분석", "면접"]
 DIFFICULTIES = ["쉬움", "보통", "어려움"]
@@ -442,6 +440,9 @@ def initialize_player_session() -> None:
         st.session_state.extra["capture_starter_granted"] = True
     st.session_state.player_loaded = True
     st.session_state.player_loaded_user_id = uid
+    st.session_state._save_baseline_signature = _state_signature()
+    st.session_state.save_dirty = False
+    st.session_state.last_manual_save_at = None
 
 
 
@@ -477,25 +478,97 @@ def initialize_temp_session() -> None:
                 st.session_state[key] = value
 
 
+def _current_player_payload() -> dict[str, Any]:
+    """현재 세션의 영구 저장 대상만 한곳에서 수집한다."""
+    return {
+        "user_id": current_user_id(),
+        "level": st.session_state.level,
+        "xp": st.session_state.xp,
+        "stat_points": st.session_state.stat_points,
+        "intelligence": st.session_state.intelligence,
+        "wisdom": st.session_state.wisdom,
+        "vitality": st.session_state.vitality,
+        "luck": st.session_state.luck,
+        "player_hp": st.session_state.player_hp,
+        "battle_tickets": st.session_state.battle_tickets,
+        "inventory": st.session_state.inventory,
+        "equipped_item": st.session_state.equipped_items,
+        "extra_state": st.session_state.extra,
+    }
+
+
+def _state_signature(payload: dict[str, Any] | None = None) -> str:
+    """
+    DB 조회 없이 현재 상태가 마지막 저장본과 달라졌는지 비교하기 위한 서명.
+    JSON 직렬화만 하므로 네트워크 지연이 없다.
+    """
+    data = payload if payload is not None else _current_player_payload()
+    return json.dumps(
+        data,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
+def mark_saved_baseline() -> None:
+    """현재 세션 상태를 '마지막으로 저장된 상태' 기준점으로 기록한다."""
+    st.session_state._save_baseline_signature = _state_signature()
+    st.session_state.save_dirty = False
+
+
+def has_unsaved_changes() -> bool:
+    """현재 상태와 마지막 저장 기준점을 비교한다."""
+    if not st.session_state.get("player_loaded"):
+        return False
+
+    baseline = st.session_state.get("_save_baseline_signature")
+    if baseline is None:
+        return bool(st.session_state.get("save_dirty", False))
+
+    dirty = _state_signature() != baseline
+    st.session_state.save_dirty = dirty
+    return dirty
+
+
 def persist() -> None:
+    """
+    기존 게임 코드와의 호환용 함수.
+
+    과거에는 호출 즉시 Supabase에 저장했지만,
+    이제는 현재 상태가 바뀌었는지만 표시한다.
+    실제 외부 저장은 save_now()가 담당한다.
+    """
+    st.session_state.save_dirty = has_unsaved_changes()
+
+
+def save_now(force: bool = False) -> bool:
+    """
+    현재 플레이어 상태를 Supabase에 한 번 저장한다.
+
+    Returns:
+        True  -> 실제 DB 저장 수행
+        False -> 변경사항이 없어 저장 생략
+    """
+    if not st.session_state.get("player_loaded"):
+        return False
+
+    dirty = has_unsaved_changes()
+    if not force and not dirty:
+        return False
+
+    payload = _current_player_payload()
     save_player_state(
-        {
-            "user_id": current_user_id(),
-            "level": st.session_state.level,
-            "xp": st.session_state.xp,
-            "stat_points": st.session_state.stat_points,
-            "intelligence": st.session_state.intelligence,
-            "wisdom": st.session_state.wisdom,
-            "vitality": st.session_state.vitality,
-            "luck": st.session_state.luck,
-            "player_hp": st.session_state.player_hp,
-            "battle_tickets": st.session_state.battle_tickets,
-            "inventory": st.session_state.inventory,
-            "equipped_item": st.session_state.equipped_items,
-            "extra_state": st.session_state.extra,
-        },
+        payload,
         current_user_id(),
     )
+
+    mark_saved_baseline()
+    st.session_state.last_manual_save_at = datetime.now().isoformat(
+        timespec="seconds"
+    )
+    return True
 
 
 def seed_test_profile_if_needed() -> None:

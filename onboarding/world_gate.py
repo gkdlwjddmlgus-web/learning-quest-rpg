@@ -526,10 +526,15 @@ def _render_new_world_intro() -> None:
 
 def render_world_gate() -> bool:
     _ensure_gate_state()
-    _portal_scene_marker()
 
+    # 이미 월드 진입이 끝난 상태라면 portal marker를 만들지 않는다.
+    # portal marker가 존재하면 CSS가 sidebar 전체를 숨기므로,
+    # 홈/게임 화면에서는 반드시 marker 없이 True를 반환해야 한다.
     if st.session_state.get("world_gate_done"):
         return True
+
+    # 로그인 후 월드 선택/생성/인트로 화면에서만 cinematic portal mode 활성화
+    _portal_scene_marker()
 
     mode = st.session_state.world_gate_mode
 

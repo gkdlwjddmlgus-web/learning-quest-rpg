@@ -5,6 +5,25 @@ from auth import logout
 def render_sidebar() -> None:
     with st.sidebar:
         active_world_sidebar = get_active_learning_world()
+
+        # 현재 월드 테마를 CSS가 읽을 수 있도록 숨은 marker를 둔다.
+        theme_name = str(
+            (active_world_sidebar or {}).get("game_theme")
+            or (active_world_sidebar or {}).get("theme")
+            or "현대"
+        )
+        theme_key = {
+            "판타지": "fantasy",
+            "무협": "wuxia",
+            "SF": "sf",
+            "귀여운 몬스터": "cute",
+            "다크 판타지": "dark-fantasy",
+            "현대": "modern",
+        }.get(theme_name, "modern")
+        st.markdown(
+            f'<div class="sidebar-theme-marker sidebar-theme-{theme_key}"></div>',
+            unsafe_allow_html=True,
+        )
         level = int(st.session_state.level)
         xp_now = int(st.session_state.xp)
         xp_need = max(1, required_xp(level))
@@ -81,6 +100,44 @@ def render_sidebar() -> None:
                     st.session_state.player_hp = max_hp()
                 persist()
                 st.rerun()
+
+        st.markdown('<div class="hud-section-title">SAVE</div>', unsafe_allow_html=True)
+
+        save_dirty = has_unsaved_changes()
+        last_saved_at = st.session_state.get("last_manual_save_at")
+
+        if save_dirty:
+            st.warning("저장되지 않은 변경사항이 있습니다.", icon="🟡")
+        else:
+            st.caption("✅ 현재 진행상황이 저장된 상태입니다.")
+
+        if last_saved_at:
+            try:
+                saved_time_text = datetime.fromisoformat(
+                    str(last_saved_at)
+                ).strftime("%H:%M:%S")
+                st.caption(f"마지막 저장: {saved_time_text}")
+            except Exception:
+                st.caption("마지막 저장 완료")
+        else:
+            st.caption("이번 접속에서는 아직 수동 저장하지 않았습니다.")
+
+        if st.button(
+            "💾 지금 저장",
+            key="manual_save_button",
+            type="primary" if save_dirty else "secondary",
+            width="stretch",
+            disabled=not save_dirty,
+        ):
+            try:
+                did_save = save_now()
+            except Exception as exc:
+                st.error(f"저장하지 못했습니다. 다시 시도해주세요. ({exc})")
+            else:
+                if did_save:
+                    st.toast("진행상황을 저장했습니다. 💾")
+                st.rerun()
+
 
         st.markdown('<div class="hud-section-title">ACTIONS</div>', unsafe_allow_html=True)
         for skill, info in SKILLS.items():

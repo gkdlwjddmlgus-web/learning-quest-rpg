@@ -486,5 +486,22 @@ def login_gate() -> bool:
 
 
 def logout() -> None:
+    """
+    저장되지 않은 변경사항이 있으면 먼저 Supabase 저장을 완료한 뒤 로그아웃한다.
+    저장 실패 시 세션을 지우지 않아 진행상황 손실을 막는다.
+    """
+    if st.session_state.get("player_loaded"):
+        try:
+            from game_core import has_unsaved_changes, save_now
+
+            if has_unsaved_changes():
+                save_now()
+        except Exception as exc:
+            st.error(
+                "진행상황 저장에 실패하여 로그아웃을 중단했습니다. "
+                f"다시 시도해주세요. ({exc})"
+            )
+            return
+
     st.session_state.clear()
     st.rerun()
