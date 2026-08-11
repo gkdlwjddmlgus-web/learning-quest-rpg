@@ -764,49 +764,96 @@ def record_question_attempt(
     xp_earned: int = 0,
     attempt_type: str = "quest",
 ) -> None:
-    initialize_database()
-    with get_connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO question_attempts (
-                user_id, world_id, question_id, category, category_key, subject_id,
-                difficulty, question_type, is_correct, user_answer, correct_answer,
-                xp_earned, attempt_type
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                str(user_id), int(world_id) if world_id is not None else None,
-                int(question_id) if question_id is not None else None,
-                category, category_key, subject_id, difficulty, question_type,
-                1 if is_correct else 0,
-                json.dumps(user_answer, ensure_ascii=False) if isinstance(user_answer, (list, dict)) else str(user_answer or ""),
-                json.dumps(correct_answer, ensure_ascii=False) if isinstance(correct_answer, (list, dict)) else str(correct_answer or ""),
-                int(xp_earned), str(attempt_type or "quest"),
-            ),
-        )
+    with get_player_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO public.question_attempts (
+                    user_id,
+                    world_id,
+                    question_id,
+                    category,
+                    category_key,
+                    subject_id,
+                    difficulty,
+                    question_type,
+                    is_correct,
+                    user_answer,
+                    correct_answer,
+                    xp_earned,
+                    attempt_type,
+                    created_at
+                )
+                VALUES (
+                    %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s
+                )
+                """,
+                (
+                    str(user_id),
+                    int(world_id) if world_id is not None else None,
+                    int(question_id) if question_id is not None else None,
+                    category,
+                    category_key,
+                    subject_id,
+                    difficulty,
+                    question_type,
+                    1 if is_correct else 0,
+                    json.dumps(user_answer, ensure_ascii=False)
+                    if isinstance(user_answer, (list, dict))
+                    else str(user_answer or ""),
+                    json.dumps(correct_answer, ensure_ascii=False)
+                    if isinstance(correct_answer, (list, dict))
+                    else str(correct_answer or ""),
+                    int(xp_earned),
+                    str(attempt_type or "quest"),
+                    datetime.now().isoformat(timespec="seconds"),
+                ),
+            )
+
         conn.commit()
 
 
-def get_question_attempts(user_id: str, world_id: int | None = None, days: int | None = None) -> list[dict[str, Any]]:
-    initialize_database()
-    clauses = ["user_id=?"]
+def get_question_attempts(
+    user_id: str,
+    world_id: int | None = None,
+    days: int | None = None,
+) -> list[dict[str, Any]]:
+    clauses = ["user_id = %s"]
     params: list[Any] = [str(user_id)]
+
     if world_id is not None:
-        clauses.append("world_id=?")
+        clauses.append("world_id = %s")
         params.append(int(world_id))
+
     if days is not None:
-        cutoff = (datetime.now() - timedelta(days=int(days))).isoformat(timespec="seconds")
-        clauses.append("datetime(created_at) >= datetime(?)")
+        cutoff = (
+            datetime.now() - timedelta(days=int(days))
+        ).isoformat(timespec="seconds")
+        clauses.append("created_at >= %s")
         params.append(cutoff)
-    sql = "SELECT * FROM question_attempts WHERE " + " AND ".join(clauses) + " ORDER BY id DESC"
-    with get_connection() as conn:
-        rows = conn.execute(sql, params).fetchall()
+
+    sql = (
+        "SELECT * FROM public.question_attempts WHERE "
+        + " AND ".join(clauses)
+        + " ORDER BY id DESC"
+    )
+
+    with get_player_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, tuple(params))
+            rows = cur.fetchall()
+
     result: list[dict[str, Any]] = []
+
     for row in rows:
         data = dict(row)
         data["is_correct"] = bool(data.get("is_correct", 0))
         result.append(data)
+
     return result
+
+
 
 
 # 모듈 import 시 DB를 파괴하지 않고 필요한 테이블/컬럼만 보강한다.
