@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import copy
 import json
 import sqlite3
 from contextlib import contextmanager
@@ -306,6 +307,56 @@ def _loads(value: Any, default: Any) -> Any:
         return default
 
 
+
+def _session_cache(name: str) -> dict:
+    cache = st.session_state.get(name)
+    if not isinstance(cache, dict):
+        cache = {}
+        st.session_state[name] = cache
+    return cache
+
+
+def _player_cache() -> dict:
+    return _session_cache("_repo_player_cache")
+
+
+def _world_cache() -> dict:
+    return _session_cache("_repo_world_cache")
+
+
+def _attempt_cache() -> dict:
+    return _session_cache("_repo_attempt_cache")
+
+
+def _copy_data(value: Any) -> Any:
+    return copy.deepcopy(value)
+
+
+def _player_compare_payload(state: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "level": int(state.get("level", 1)),
+        "xp": int(state.get("xp", 0)),
+        "stat_points": int(state.get("stat_points", 0)),
+        "intelligence": int(state.get("intelligence", 1)),
+        "wisdom": int(state.get("wisdom", 1)),
+        "vitality": int(state.get("vitality", 1)),
+        "luck": int(state.get("luck", 1)),
+        "player_hp": int(state.get("player_hp", 50)),
+        "battle_tickets": int(state.get("battle_tickets", 5)),
+        "inventory": state.get("inventory", []),
+        "equipped_item": state.get("equipped_item", {}),
+        "extra_state": state.get("extra_state", {}),
+    }
+
+
+def _invalidate_attempt_cache(user_id: str) -> None:
+    uid = str(user_id)
+    cache = _attempt_cache()
+    for key in list(cache.keys()):
+        if isinstance(key, tuple) and key and key[0] == uid:
+            cache.pop(key, None)
+
+
 def _player_row_to_dict(row: Any) -> dict[str, Any]:
     data = dict(row)
     data["inventory"] = _loads(data.get("inventory"), [])
@@ -319,6 +370,10 @@ def get_or_create_player_state(
     user_id: str = LOCAL_USER_ID,
 ) -> dict[str, Any]:
     uid = str(user_id)
+    cache = _player_cache()
+
+    if uid in cache:
+        return _copy_data(cache[uid])
 
     with get_player_connection() as conn:
         with conn.cursor() as cur:
@@ -371,7 +426,9 @@ def get_or_create_player_state(
             f"player_state를 생성하거나 불러오지 못했습니다: {uid}"
         )
 
-    return _player_row_to_dict(row)
+    state = _player_row_to_dict(row)
+    cache[uid] = _copy_data(state)
+    return _copy_data(state)
 
 
 @perf_log("db.player.save")
@@ -380,41 +437,24 @@ def save_player_state(
     user_id: str = LOCAL_USER_ID,
 ) -> None:
     uid = str(user_id or state.get("user_id") or LOCAL_USER_ID)
+    cache = _player_cache()
+
+    if uid in cache:
+        current = _copy_data(cache[uid])
+    else:
+        current = get_or_create_player_state(uid)
+
+    merged = {**current, **state, "user_id": uid}
+
+    # 실제 저장 대상 값이 전혀 바뀌지 않았다면 PostgreSQL WRITE 자체를 생략한다.
+    if _player_compare_payload(current) == _player_compare_payload(merged):
+        cache[uid] = _copy_data(merged)
+        return
+
+    updated_at = datetime.now().isoformat(timespec="seconds")
 
     with get_player_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT *
-                FROM public.player_state
-                WHERE user_id = %s
-                """,
-                (uid,),
-            )
-            row = cur.fetchone()
-
-            if row is None:
-                current = {
-                    "user_id": uid,
-                    "level": 1,
-                    "xp": 0,
-                    "stat_points": 0,
-                    "intelligence": 1,
-                    "wisdom": 1,
-                    "vitality": 1,
-                    "luck": 1,
-                    "player_hp": 50,
-                    "battle_tickets": 5,
-                    "inventory": [],
-                    "equipped_item": {},
-                    "extra_state": {},
-                }
-            else:
-                current = _player_row_to_dict(row)
-
-            merged = {**current, **state, "user_id": uid}
-            updated_at = datetime.now().isoformat(timespec="seconds")
-
             cur.execute(
                 """
                 INSERT INTO public.player_state (
@@ -463,6 +503,8 @@ def save_player_state(
             )
         conn.commit()
 
+    merged["updated_at"] = updated_at
+    cache[uid] = _copy_data(merged)
 
 
 def _build_question_hash(category: str, difficulty: str, question_text: str) -> str:
@@ -643,7 +685,6 @@ def create_learning_world(
 
     with get_player_connection() as conn:
         with conn.cursor() as cur:
-            # 한 사용자당 활성 월드는 하나만 유지
             cur.execute(
                 """
                 UPDATE public.learning_worlds
@@ -656,18 +697,10 @@ def create_learning_world(
             cur.execute(
                 """
                 INSERT INTO public.learning_worlds (
-                    user_id,
-                    world_name,
-                    topic,
-                    goal,
-                    learner_level,
-                    game_theme,
-                    subjects,
-                    regions,
-                    monsters,
-                    world_data,
-                    is_active,
-                    created_at
+                    user_id, world_name, topic, goal,
+                    learner_level, game_theme,
+                    subjects, regions, monsters, world_data,
+                    is_active, created_at
                 )
                 VALUES (
                     %s, %s, %s, %s, %s, %s,
@@ -689,14 +722,13 @@ def create_learning_world(
                     datetime.now().isoformat(timespec="seconds"),
                 ),
             )
-
             row = cur.fetchone()
-
         conn.commit()
 
     if row is None:
         raise RuntimeError("새 학습 월드의 ID를 받아오지 못했습니다.")
 
+    _world_cache().pop(uid, None)
     return int(row["id"])
 
 
@@ -705,6 +737,10 @@ def get_learning_worlds(
     user_id: str = LOCAL_USER_ID,
 ) -> list[dict[str, Any]]:
     uid = str(user_id)
+    cache = _world_cache()
+
+    if uid in cache:
+        return _copy_data(cache[uid])
 
     with get_player_connection() as conn:
         with conn.cursor() as cur:
@@ -719,7 +755,9 @@ def get_learning_worlds(
             )
             rows = cur.fetchall()
 
-    return [_world_row_to_dict(row) for row in rows]
+    worlds = [_world_row_to_dict(row) for row in rows]
+    cache[uid] = _copy_data(worlds)
+    return _copy_data(worlds)
 
 
 @perf_log("db.world.active")
@@ -728,35 +766,17 @@ def get_active_learning_world(
 ) -> dict[str, Any] | None:
     uid = str(user_id)
 
-    with get_player_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT *
-                FROM public.learning_worlds
-                WHERE user_id = %s
-                  AND is_active = 1
-                ORDER BY id DESC
-                LIMIT 1
-                """,
-                (uid,),
-            )
-            row = cur.fetchone()
+    # 별도 SELECT를 하지 않고 월드 목록 캐시에서 활성 월드를 찾는다.
+    worlds = get_learning_worlds(uid)
 
-            if row is None:
-                cur.execute(
-                    """
-                    SELECT *
-                    FROM public.learning_worlds
-                    WHERE user_id = %s
-                    ORDER BY id DESC
-                    LIMIT 1
-                    """,
-                    (uid,),
-                )
-                row = cur.fetchone()
+    if not worlds:
+        return None
 
-    return _world_row_to_dict(row) if row is not None else None
+    for world in worlds:
+        if world.get("is_active"):
+            return _copy_data(world)
+
+    return _copy_data(worlds[0])
 
 
 @perf_log("db.world.set_active")
@@ -767,44 +787,51 @@ def set_active_learning_world(
     uid = str(user_id)
     wid = int(world_id)
 
+    cached_worlds = _world_cache().get(uid)
+    if cached_worlds is not None:
+        if not any(int(w["id"]) == wid for w in cached_worlds):
+            return False
+
     with get_player_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT id
-                FROM public.learning_worlds
-                WHERE id = %s
-                  AND user_id = %s
-                """,
-                (wid, uid),
-            )
-
-            if cur.fetchone() is None:
-                return False
+            if cached_worlds is None:
+                cur.execute(
+                    """
+                    SELECT id
+                    FROM public.learning_worlds
+                    WHERE id = %s AND user_id = %s
+                    """,
+                    (wid, uid),
+                )
+                if cur.fetchone() is None:
+                    return False
 
             cur.execute(
                 """
                 UPDATE public.learning_worlds
-                SET is_active = 0
+                SET is_active = CASE WHEN id = %s THEN 1 ELSE 0 END
                 WHERE user_id = %s
                 """,
-                (uid,),
-            )
-
-            cur.execute(
-                """
-                UPDATE public.learning_worlds
-                SET is_active = 1
-                WHERE id = %s
-                  AND user_id = %s
-                """,
                 (wid, uid),
             )
-
         conn.commit()
 
-    return True
+    if cached_worlds is not None:
+        updated_worlds = []
+        for world in cached_worlds:
+            item = _copy_data(world)
+            item["is_active"] = int(item["id"]) == wid
+            updated_worlds.append(item)
 
+        updated_worlds.sort(
+            key=lambda w: (bool(w.get("is_active")), int(w.get("id", 0))),
+            reverse=True,
+        )
+        _world_cache()[uid] = updated_worlds
+    else:
+        _world_cache().pop(uid, None)
+
+    return True
 
 
 @perf_log("db.attempt.insert")
@@ -824,25 +851,19 @@ def record_question_attempt(
     xp_earned: int = 0,
     attempt_type: str = "quest",
 ) -> None:
+    uid = str(user_id)
+    created_at = datetime.now().isoformat(timespec="seconds")
+
     with get_player_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO public.question_attempts (
-                    user_id,
-                    world_id,
-                    question_id,
-                    category,
-                    category_key,
-                    subject_id,
-                    difficulty,
-                    question_type,
-                    is_correct,
-                    user_answer,
-                    correct_answer,
-                    xp_earned,
-                    attempt_type,
-                    created_at
+                    user_id, world_id, question_id,
+                    category, category_key, subject_id,
+                    difficulty, question_type, is_correct,
+                    user_answer, correct_answer,
+                    xp_earned, attempt_type, created_at
                 )
                 VALUES (
                     %s, %s, %s, %s, %s, %s, %s,
@@ -850,7 +871,7 @@ def record_question_attempt(
                 )
                 """,
                 (
-                    str(user_id),
+                    uid,
                     int(world_id) if world_id is not None else None,
                     int(question_id) if question_id is not None else None,
                     category,
@@ -867,11 +888,13 @@ def record_question_attempt(
                     else str(correct_answer or ""),
                     int(xp_earned),
                     str(attempt_type or "quest"),
-                    datetime.now().isoformat(timespec="seconds"),
+                    created_at,
                 ),
             )
-
         conn.commit()
+
+    # 새 제출이 생겼으므로 이 사용자의 기존 조회 캐시는 폐기한다.
+    _invalidate_attempt_cache(uid)
 
 
 @perf_log("db.attempt.list")
@@ -880,8 +903,20 @@ def get_question_attempts(
     world_id: int | None = None,
     days: int | None = None,
 ) -> list[dict[str, Any]]:
+    uid = str(user_id)
+    cache_key = (
+        uid,
+        int(world_id) if world_id is not None else None,
+        int(days) if days is not None else None,
+        datetime.now().date().isoformat(),
+    )
+    cache = _attempt_cache()
+
+    if cache_key in cache:
+        return _copy_data(cache[cache_key])
+
     clauses = ["user_id = %s"]
-    params: list[Any] = [str(user_id)]
+    params: list[Any] = [uid]
 
     if world_id is not None:
         clauses.append("world_id = %s")
@@ -906,13 +941,13 @@ def get_question_attempts(
             rows = cur.fetchall()
 
     result: list[dict[str, Any]] = []
-
     for row in rows:
         data = dict(row)
         data["is_correct"] = bool(data.get("is_correct", 0))
         result.append(data)
 
-    return result
+    cache[cache_key] = _copy_data(result)
+    return _copy_data(result)
 
 
 
