@@ -5,3 +5,4 @@ numpy==2.5.1
 matplotlib==3.11.1
 pillow==12.3.0
 requests==2.34.2
+psycopg[binary]==3.3.4
