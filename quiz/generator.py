@@ -365,7 +365,7 @@ def ensure_question_pool(
     category: str,
     difficulty: str,
     minimum_count: int = 5,
-    generate_count: int = 5,
+    generate_count: int = 10,
     *,
     world_topic: str | None = None,
     world_goal: str | None = None,
