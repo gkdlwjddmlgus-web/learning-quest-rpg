@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">
+<defs><filter id="g"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+<rect width="120" height="120" rx="16" fill="none"/>
+<path d="M25 92 L42 42 L55 92 Z M50 92 L68 28 L89 92 Z" fill="#55724a"/><rect x="54" y="73" width="8" height="22" fill="#5b4631"/>
+<circle cx="60" cy="50" r="15" fill="#79d7ff" opacity=".12" filter="url(#g)"/>
+<text x="60" y="58" text-anchor="middle" font-size="18" fill="#79d7ff" font-family="Arial">♣</text>
+<path d="M18 99 H102" stroke="#96e6ff" stroke-width="2" opacity=".5"/>
+</svg>

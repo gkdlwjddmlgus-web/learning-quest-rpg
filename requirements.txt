@@ -1,0 +1,7 @@
+streamlit==1.60.0
+google-genai==2.16.0
+pandas==3.0.5
+numpy==2.5.1
+matplotlib==3.11.1
+pillow==12.3.0
+requests==2.34.2

@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Streamlit secrets
+.streamlit/secrets.toml
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Development backups
+version/
+core_version/
+pages/
+
+# Temporary development notes
+README_*.md

@@ -1,0 +1,48 @@
+{
+  "theme_map": {
+    "판타지": "fantasy",
+    "무협": "murim",
+    "SF": "sf",
+    "귀여운 몬스터": "cute",
+    "다크 판타지": "dark_fantasy",
+    "현대": "modern"
+  },
+  "building_files": {
+    "guild": "guild.svg",
+    "tower": "tower.svg",
+    "forge": "forge.svg",
+    "classhall": "classhall.svg",
+    "library": "library.svg",
+    "hunt": "hunt.svg",
+    "dungeon": "dungeon.svg",
+    "observatory": "observatory.svg",
+    "bestiary": "bestiary.svg"
+  },
+  "avatars": {
+    "explorer": {
+      "name": "탐험가",
+      "file": "explorer.svg"
+    },
+    "warrior": {
+      "name": "검사",
+      "file": "warrior.svg"
+    },
+    "mage": {
+      "name": "마도사",
+      "file": "mage.svg"
+    },
+    "scholar": {
+      "name": "학자",
+      "file": "scholar.svg"
+    },
+    "ranger": {
+      "name": "정찰자",
+      "file": "ranger.svg"
+    },
+    "monk": {
+      "name": "수련가",
+      "file": "monk.svg"
+    }
+  },
+  "replacement_note": "PNG/WebP로 교체하려면 village_hub.py의 asset 후보 확장자 또는 같은 역할 파일을 변경하세요."
+}
