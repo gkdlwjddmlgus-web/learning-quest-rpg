@@ -560,7 +560,7 @@ def mark_question_as_solved(question_id: int) -> None:
         conn.commit()
 
 
-def _world_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+def _world_row_to_dict(row: Any) -> dict[str, Any]:
     data = dict(row)
     data["subjects"] = _loads(data.get("subjects"), [])
     data["regions"] = _loads(data.get("regions"), [])
@@ -583,68 +583,169 @@ def create_learning_world(
     world_data: dict[str, Any],
     user_id: str = LOCAL_USER_ID,
 ) -> int:
-    initialize_database()
     uid = str(user_id)
-    with get_connection() as conn:
-        conn.execute("UPDATE learning_worlds SET is_active=0 WHERE user_id=?", (uid,))
-        cur = conn.execute(
-            """
-            INSERT INTO learning_worlds (
-                user_id, world_name, topic, goal, learner_level, game_theme,
-                subjects, regions, monsters, world_data, is_active
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-            """,
-            (
-                uid,
-                str(world_name), str(topic), str(goal), str(learner_level), str(game_theme),
-                json.dumps(subjects, ensure_ascii=False),
-                json.dumps(regions, ensure_ascii=False),
-                json.dumps(monsters, ensure_ascii=False),
-                json.dumps(world_data, ensure_ascii=False),
-            ),
-        )
-        conn.commit()
-        return int(cur.lastrowid)
 
-
-def get_learning_worlds(user_id: str = LOCAL_USER_ID) -> list[dict[str, Any]]:
-    initialize_database()
-    with get_connection() as conn:
-        rows = conn.execute(
-            "SELECT * FROM learning_worlds WHERE user_id=? ORDER BY is_active DESC, id DESC",
-            (str(user_id),),
-        ).fetchall()
-    return [_world_row_to_dict(r) for r in rows]
-
-
-def get_active_learning_world(user_id: str = LOCAL_USER_ID) -> dict[str, Any] | None:
-    initialize_database()
-    uid = str(user_id)
-    with get_connection() as conn:
-        row = conn.execute(
-            "SELECT * FROM learning_worlds WHERE user_id=? AND is_active=1 ORDER BY id DESC LIMIT 1",
-            (uid,),
-        ).fetchone()
-        if row is None:
-            row = conn.execute(
-                "SELECT * FROM learning_worlds WHERE user_id=? ORDER BY id DESC LIMIT 1",
+    with get_player_connection() as conn:
+        with conn.cursor() as cur:
+            # 한 사용자당 활성 월드는 하나만 유지
+            cur.execute(
+                """
+                UPDATE public.learning_worlds
+                SET is_active = 0
+                WHERE user_id = %s
+                """,
                 (uid,),
-            ).fetchone()
+            )
+
+            cur.execute(
+                """
+                INSERT INTO public.learning_worlds (
+                    user_id,
+                    world_name,
+                    topic,
+                    goal,
+                    learner_level,
+                    game_theme,
+                    subjects,
+                    regions,
+                    monsters,
+                    world_data,
+                    is_active,
+                    created_at
+                )
+                VALUES (
+                    %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, 1, %s
+                )
+                RETURNING id
+                """,
+                (
+                    uid,
+                    str(world_name),
+                    str(topic),
+                    str(goal),
+                    str(learner_level),
+                    str(game_theme),
+                    json.dumps(subjects, ensure_ascii=False),
+                    json.dumps(regions, ensure_ascii=False),
+                    json.dumps(monsters, ensure_ascii=False),
+                    json.dumps(world_data, ensure_ascii=False),
+                    datetime.now().isoformat(timespec="seconds"),
+                ),
+            )
+
+            row = cur.fetchone()
+
+        conn.commit()
+
+    if row is None:
+        raise RuntimeError("새 학습 월드의 ID를 받아오지 못했습니다.")
+
+    return int(row["id"])
+
+
+def get_learning_worlds(
+    user_id: str = LOCAL_USER_ID,
+) -> list[dict[str, Any]]:
+    uid = str(user_id)
+
+    with get_player_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM public.learning_worlds
+                WHERE user_id = %s
+                ORDER BY is_active DESC, id DESC
+                """,
+                (uid,),
+            )
+            rows = cur.fetchall()
+
+    return [_world_row_to_dict(row) for row in rows]
+
+
+def get_active_learning_world(
+    user_id: str = LOCAL_USER_ID,
+) -> dict[str, Any] | None:
+    uid = str(user_id)
+
+    with get_player_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM public.learning_worlds
+                WHERE user_id = %s
+                  AND is_active = 1
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (uid,),
+            )
+            row = cur.fetchone()
+
+            if row is None:
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM public.learning_worlds
+                    WHERE user_id = %s
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (uid,),
+                )
+                row = cur.fetchone()
+
     return _world_row_to_dict(row) if row is not None else None
 
 
-def set_active_learning_world(world_id: int, user_id: str = LOCAL_USER_ID) -> bool:
-    initialize_database()
+def set_active_learning_world(
+    world_id: int,
+    user_id: str = LOCAL_USER_ID,
+) -> bool:
     uid = str(user_id)
     wid = int(world_id)
-    with get_connection() as conn:
-        row = conn.execute("SELECT id FROM learning_worlds WHERE id=? AND user_id=?", (wid, uid)).fetchone()
-        if row is None:
-            return False
-        conn.execute("UPDATE learning_worlds SET is_active=0 WHERE user_id=?", (uid,))
-        conn.execute("UPDATE learning_worlds SET is_active=1 WHERE id=? AND user_id=?", (wid, uid))
+
+    with get_player_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id
+                FROM public.learning_worlds
+                WHERE id = %s
+                  AND user_id = %s
+                """,
+                (wid, uid),
+            )
+
+            if cur.fetchone() is None:
+                return False
+
+            cur.execute(
+                """
+                UPDATE public.learning_worlds
+                SET is_active = 0
+                WHERE user_id = %s
+                """,
+                (uid,),
+            )
+
+            cur.execute(
+                """
+                UPDATE public.learning_worlds
+                SET is_active = 1
+                WHERE id = %s
+                  AND user_id = %s
+                """,
+                (wid, uid),
+            )
+
         conn.commit()
+
     return True
+
 
 
 def record_question_attempt(
