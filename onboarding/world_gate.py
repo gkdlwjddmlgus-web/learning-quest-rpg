@@ -6,7 +6,7 @@ from typing import Any
 
 import streamlit as st
 
-from core import (
+from game_core import (
     build_world_intro_lines,
     friendly_ai_error,
     generate_and_save_learning_world,

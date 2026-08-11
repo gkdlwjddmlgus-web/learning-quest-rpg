@@ -10,8 +10,7 @@ from auth import login_gate
 if not login_gate():
     st.stop()
 
-import core
-
+import game_core as core
 core.initialize_player_session()
 core.initialize_temp_session()
 core.seed_test_profile_if_needed()

@@ -8,8 +8,8 @@ from pathlib import Path
 
 import streamlit as st
 
-import core
-from core import get_active_learning_world, get_learning_worlds, set_active_learning_world
+import game_core as core
+from game_core import get_active_learning_world, get_learning_worlds, set_active_learning_world
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent

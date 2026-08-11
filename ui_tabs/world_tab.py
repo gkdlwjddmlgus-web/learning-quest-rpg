@@ -1,4 +1,4 @@
-from core import *
+from game_core import *
 
 
 def render_world_tab() -> None:
