@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from datetime import datetime, timedelta
@@ -324,41 +325,109 @@ def save_player_state(state: dict[str, Any], user_id: str = LOCAL_USER_ID) -> No
         conn.commit()
 
 
+def _build_question_hash(category: str, difficulty: str, question_text: str) -> str:
+    """레거시 questions.question_hash 컬럼과 호환되는 안정적인 문제 식별자."""
+    payload = f"{str(category).strip()}|{str(difficulty).strip()}|{str(question_text).strip()}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def save_question(question: dict[str, Any]) -> bool:
     initialize_database()
+
     category = str(question.get("category", "")).strip()
     difficulty = str(question.get("difficulty", "")).strip()
     qtext = str(question.get("question", "")).strip()
+
     if not category or not difficulty or not qtext:
         raise ValueError("문제 저장에 필요한 category/difficulty/question이 없습니다.")
+
+    question_type = str(question.get("question_type", "multiple_choice"))
+    options = (
+        json.dumps(question.get("options"), ensure_ascii=False)
+        if question.get("options") is not None
+        else None
+    )
+    answer = (
+        json.dumps(question.get("answer"), ensure_ascii=False)
+        if isinstance(question.get("answer"), (list, dict))
+        else str(question.get("answer", ""))
+    )
+    explanation = str(question.get("explanation", ""))
+    keywords = (
+        json.dumps(question.get("keywords"), ensure_ascii=False)
+        if question.get("keywords") is not None
+        else None
+    )
+    xp = int(question.get("xp", 10))
+    source = str(question.get("source", ""))
+
     with get_connection() as conn:
+        columns = _table_columns(conn, "questions")
+        has_question_hash = "question_hash" in columns
+
         dup = conn.execute(
-            "SELECT id FROM questions WHERE category=? AND difficulty=? AND question=? LIMIT 1",
+            "SELECT id FROM questions "
+            "WHERE category=? AND difficulty=? AND question=? LIMIT 1",
             (category, difficulty, qtext),
         ).fetchone()
         if dup is not None:
             return False
-        conn.execute(
-            """
-            INSERT INTO questions (
-                category, difficulty, question_type, question, options, answer,
-                explanation, keywords, xp, source, solved
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-            """,
-            (
-                category,
-                difficulty,
-                str(question.get("question_type", "multiple_choice")),
-                qtext,
-                json.dumps(question.get("options"), ensure_ascii=False) if question.get("options") is not None else None,
-                json.dumps(question.get("answer"), ensure_ascii=False) if isinstance(question.get("answer"), (list, dict)) else str(question.get("answer", "")),
-                str(question.get("explanation", "")),
-                json.dumps(question.get("keywords"), ensure_ascii=False) if question.get("keywords") is not None else None,
-                int(question.get("xp", 10)),
-                str(question.get("source", "")),
-            ),
-        )
+
+        if has_question_hash:
+            question_hash = _build_question_hash(category, difficulty, qtext)
+
+            hash_dup = conn.execute(
+                "SELECT id FROM questions WHERE question_hash=? LIMIT 1",
+                (question_hash,),
+            ).fetchone()
+            if hash_dup is not None:
+                return False
+
+            conn.execute(
+                """
+                INSERT INTO questions (
+                    category, difficulty, question_type, question, options, answer,
+                    explanation, keywords, xp, source, solved, question_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                """,
+                (
+                    category,
+                    difficulty,
+                    question_type,
+                    qtext,
+                    options,
+                    answer,
+                    explanation,
+                    keywords,
+                    xp,
+                    source,
+                    question_hash,
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO questions (
+                    category, difficulty, question_type, question, options, answer,
+                    explanation, keywords, xp, source, solved
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                """,
+                (
+                    category,
+                    difficulty,
+                    question_type,
+                    qtext,
+                    options,
+                    answer,
+                    explanation,
+                    keywords,
+                    xp,
+                    source,
+                ),
+            )
+
         conn.commit()
+
     return True
 
 
