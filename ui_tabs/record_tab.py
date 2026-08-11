@@ -35,8 +35,27 @@ def render_record_tab() -> None:
         st.info("아직 이 범위에 저장된 학습 기록이 없습니다. 문제를 한 번 제출하면 여기부터 기록되기 시작합니다.")
     else:
         df = pd.DataFrame(attempts)
-        df["attempted_at"] = pd.to_datetime(df["attempted_at"], errors="coerce")
+
+        # 현재 Supabase 스키마는 created_at을 사용한다.
+        # 예전 SQLite/레거시 데이터에 attempted_at이 남아 있어도 호환한다.
+        if "created_at" in df.columns:
+            time_source = "created_at"
+        elif "attempted_at" in df.columns:
+            time_source = "attempted_at"
+        else:
+            st.error("학습 기록에서 시간 컬럼을 찾을 수 없습니다.")
+            return
+
+        df["attempted_at"] = pd.to_datetime(
+            df[time_source],
+            errors="coerce",
+        )
         df = df.dropna(subset=["attempted_at"])
+
+        if df.empty:
+            st.info("선택한 범위에 유효한 시간 정보가 있는 학습 기록이 없습니다.")
+            return
+
         df["is_correct_num"] = df["is_correct"].astype(int)
         df["date"] = df["attempted_at"].dt.date.astype(str)
 
